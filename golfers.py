@@ -4,10 +4,11 @@ import subprocess
 
 def encode_to_cnf(g, p, w):
     """Encodes the Social Golfer Problem into CNF."""
-    a = g * p  # Calculate the number of golfers (a) from groups (g) and players per group (p)
+    a = g * p  # Total number of golfers
     cnf = []
     var_count = 0
     mapping = {}
+    pair_mapping = {}  
     
     def get_var(i, j, k):
         """Maps a golfer-week-group tuple to a unique SAT variable."""
@@ -17,27 +18,50 @@ def encode_to_cnf(g, p, w):
             mapping[(i, j, k)] = var_count
         return mapping[(i, j, k)]
     
-    for k in range(w):  
-        for i in range(a):  
+    def get_pair_var(i1, i2, k):
+        """Maps a golfer pair-week to a unique SAT variable."""
+        nonlocal var_count
+        if (i1, i2, k) not in pair_mapping:
+            var_count += 1
+            pair_mapping[(i1, i2, k)] = var_count
+        return pair_mapping[(i1, i2, k)]
+    
+    # Ensure each golfer is in exactly one group per week
+    for k in range(w):
+        for i in range(a):
             vars = [get_var(i, j, k) for j in range(g)]
-            cnf.append(vars)  
-            for v1, v2 in combinations(vars, 2):  
-                cnf.append([-v1, -v2])
-    for k in range(w): 
-        for j in range(g): 
+            cnf.append(vars)
+            for v1, v2 in combinations(vars, 2):
+                cnf.append([-v1, -v2])  # No golfer can be in more than one group per week
+    
+    # Ensure each group has exactly p golfers per week
+    for k in range(w):
+        for j in range(g):
             vars = [get_var(i, j, k) for i in range(a)]
-            cnf.append(vars)  
-            for comb in combinations(vars, p + 1): 
-                cnf.append([-v for v in comb])
-    for j in range(g):  
-        for k1 in range(w):  
-            for k2 in range(k1 + 1, w): 
-                for i1 in range(a):     
-                    for i2 in range(i1 + 1, a): 
-                        cnf.append([-get_var(i1, j, k1), -get_var(i2, j, k1), -get_var(i1, j, k2), -get_var(i2, j, k2)])
+            cnf.append(vars)
+            for comb in combinations(vars, p + 1):
+                cnf.append([-v for v in comb])  # No group can have more than p golfers
+    
+    # Ensure no golfer pair meets more than once
+    for i1 in range(a):
+        for i2 in range(i1 + 1, a):
+            t_vars = []
+            for k in range(w):
+                t_var = get_pair_var(i1, i2, k)
+                t_vars.append(t_var)
+                for j in range(g):
+                    cnf.append([-get_var(i1, j, k), -get_var(i2, j, k), t_var])
+                group_vars = [get_var(i1, j, k) for j in range(g)]
+                cnf.append([-t_var] + group_vars)
+                group_vars = [get_var(i2, j, k) for j in range(g)]
+                cnf.append([-t_var] + group_vars)
+            for t1, t2 in combinations(t_vars, 2):
+                cnf.append([-t1, -t2])  # No pair can meet more than once
     return cnf, var_count, mapping
 
+
 def write_dimacs(cnf, var_count, filename):
+    """Writes the CNF formula to a DIMACS file."""
     print(f"Writing CNF with {var_count} variables and {len(cnf)} clauses.")
     with open(filename, 'w') as f:
         f.write(f"p cnf {var_count} {len(cnf)}\n")
@@ -122,16 +146,15 @@ def process_instance(instance_file):
 def validate_solution(solution, g, p, w):
     """Ensures the SAT solution meets basic SGP constraints."""
     a = g * p
-    # Each golfer must be in exactly one group per week:
     for k in range(w):
         seen = set()
         for j in range(g):
             for i in range(a):
                 if solution.get((i, j, k), False):
-                    if i in seen:  # Duplicate golfer
+                    if i in seen: 
                         return False
                     seen.add(i)
-        if len(seen) != a:  # Not all golfers used
+        if len(seen) != a: 
             return False
     return True
 
